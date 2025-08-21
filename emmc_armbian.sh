@@ -10,13 +10,12 @@ for i in $(seq 0 3); do
     fi
 done
 
-# 如果没有找到有效设备则退出
 if [ ! -b "$DEV" ]; then
     echo "[ERROR] No valid eMMC device found!"
     exit 1
 fi
 
-# 确保依赖包安装 (仅首次需要)
+# 安装依赖（首次需要）
 sudo apt-get update -y
 for pkg in mmc-utils hdparm; do
     dpkg -s $pkg >/dev/null 2>&1 || sudo apt-get install -y $pkg
@@ -28,7 +27,6 @@ DEV_BASENAME=$(basename $DEV)
 MODEL=$(cat /sys/block/$DEV_BASENAME/device/name 2>/dev/null)
 CID=$(cat /sys/block/$DEV_BASENAME/device/cid 2>/dev/null)
 DATE_RAW=$(cat /sys/block/$DEV_BASENAME/device/date 2>/dev/null)
-
 FWREV=$(cat /sys/block/$DEV_BASENAME/device/fwrev 2>/dev/null)
 HWREV=$(cat /sys/block/$DEV_BASENAME/device/hwrev 2>/dev/null)
 MANFID=$(cat /sys/block/$DEV_BASENAME/device/manfid 2>/dev/null)
@@ -36,10 +34,11 @@ OEMID=$(cat /sys/block/$DEV_BASENAME/device/oemid 2>/dev/null)
 PRV=$(cat /sys/block/$DEV_BASENAME/device/prv 2>/dev/null)
 SERIAL=$(cat /sys/block/$DEV_BASENAME/device/serial 2>/dev/null)
 
-# 统一日期格式 YYYY-MM
+# 统一日期格式 YYYY-MM，防止月份 08/09 出现八进制问题
 if echo "$DATE_RAW" | grep -q '/'; then
     MONTH=$(echo $DATE_RAW | cut -d'/' -f1)
     YEAR=$(echo $DATE_RAW | cut -d'/' -f2)
+    MONTH=$((10#$MONTH))   # 强制十进制
     DATE_FMT=$(printf "%04d-%02d" $YEAR $MONTH)
 else
     DATE_FMT="$DATE_RAW"
@@ -60,6 +59,20 @@ else
     CAPACITY="Unknown"
 fi
 
+# 去掉 MANFID 前导 0，只保留低 8 位
+MANFID_HEX=$(printf "0x%x" $((MANFID & 0xFF)))
+
+# 自动解析厂商
+case "$MANFID_HEX" in
+    0x02) MANF_NAME="Toshiba";;
+    0x13) MANF_NAME="Micron (镁光)";;
+    0x15) MANF_NAME="Samsung (三星)";;
+    0x20) MANF_NAME="SanDisk";;
+    0x37) MANF_NAME="Intel";;
+    0x1b) MANF_NAME="Hynix (海力士)";;
+    *)    MANF_NAME="Unknown";;
+esac
+
 echo "Device     : $DEV"
 echo "Model      : $MODEL"
 echo "CID        : $CID"
@@ -67,7 +80,7 @@ echo "Date       : $DATE_FMT"
 echo "Capacity   : $CAPACITY"
 echo "FWRev      : $FWREV"
 echo "HWRev      : $HWREV"
-echo "Manf ID    : $MANFID"
+echo "Manf ID    : $MANFID ($MANF_NAME)"
 echo "OEM ID     : $OEMID"
 echo "Product Ver: $PRV"
 echo "Serial     : $SERIAL"
@@ -75,7 +88,6 @@ echo "Serial     : $SERIAL"
 echo
 echo "==== eMMC Health (EXT_CSD) ===="
 EXT=$(sudo mmc extcsd read $DEV 2>/dev/null)
-
 A=$(echo "$EXT" | awk '/Life Time Estimation A/ {print $NF}' | sed 's/0x//')
 B=$(echo "$EXT" | awk '/Life Time Estimation B/ {print $NF}' | sed 's/0x//')
 EOL=$(echo "$EXT" | awk '/Pre EOL/ {print $NF}')
@@ -86,7 +98,7 @@ case "$EOL" in
     0x01) EOL_STR="Normal";;
     0x02) EOL_STR="Warning";;
     0x03) EOL_STR="Urgent";;
-    *) EOL_STR="Unknown";;
+    *)    EOL_STR="Unknown";;
 esac
 echo "Pre EOL info           : $EOL ($EOL_STR)"
 
